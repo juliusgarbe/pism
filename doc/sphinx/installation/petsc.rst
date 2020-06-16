@@ -6,7 +6,7 @@ Building PETSc
 --------------
 
 PISM is built on top of PETSc_, which is actively developed and an up-to-date PETSc
-distribution is unlikely to be available in package repositories. Download the PETSc
+distribution may not be available in package repositories. Download the PETSc
 source by grabbing the current gzipped tarball at:
 
     |petsc-download|
@@ -43,14 +43,8 @@ first:
    than using the system-wide version. So one may add "``--download-f2cblaslapack=1``" to
    the other configure options.
 
-#. If there is an existing MPI installation, for example at ``/home/user/mympi/``, one can
-   point PETSc to it by adding the option "``--with-mpi-dir=/home/user/mympi/``". The path
-   used in this option must have MPI executables ``mpicxx`` and ``mpicc``, and either
-   ``mpiexec`` or ``mpirun``, in sub-directory ``bin/`` and MPI library files in
-   sub-directory ``lib/``.
-
-   Alternatively, use MPI's compiler wrappers to specify an MPI library when installing
-   PETSc, for example:
+#. If there is an existing MPI installation, we recommend using MPI's compiler wrappers to
+   specify an MPI library when installing PETSc, for example:
 
    .. code-block:: bash
 
@@ -72,9 +66,8 @@ first:
    process; take note of this value. One may always reconfigure with additional
    ``PETSC_ARCH`` as needed.
 
-#. After ``configure.py`` finishes, you will need to ``make all test`` in the PETSc
-   directory and watch the result. If the X Windows system is functional some example
-   viewers will appear; as noted you will need the X header files for this to work.
+#. After ``configure.py`` finishes, you will need to run ``make all test`` in the PETSc
+   directory and watch the result.
 
 .. rubric:: Footnotes
 

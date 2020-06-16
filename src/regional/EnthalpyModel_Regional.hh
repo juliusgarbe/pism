@@ -31,9 +31,9 @@ public:
   EnthalpyModel_Regional(IceGrid::ConstPtr grid, stressbalance::StressBalance *stress_balance);
 
 protected:
-  virtual void restart_impl(const PIO &input_file, int record);
+  virtual void restart_impl(const File &input_file, int record);
 
-  virtual void bootstrap_impl(const PIO &input_file,
+  virtual void bootstrap_impl(const File &input_file,
                               const IceModelVec2S &ice_thickness,
                               const IceModelVec2S &surface_temperature,
                               const IceModelVec2S &climatic_mass_balance,
@@ -45,7 +45,6 @@ protected:
                                const IceModelVec2S &climatic_mass_balance,
                                const IceModelVec2S &basal_heat_flux);
 
-  using EnergyModel::update_impl;
   void update_impl(double t, double dt, const Inputs &inputs);
 
   IceModelVec2Int *m_no_model_mask;

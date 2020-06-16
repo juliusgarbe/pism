@@ -24,7 +24,7 @@ PISM's climate forcing code has two kinds of components.
 - Ones that can be used as "stand-alone" models, such as the implementation of the PDD
   scheme (section :ref:`sec-surface-pdd`). These are *model components*.
 - Ones implementing "corrections" of various kinds, such as lapse rate corrections
-  (sections :ref:`sec-surface-lapse-rate` and :ref:`sec-atmosphere-lapse-rate`) or
+  (sections :ref:`sec-surface-elevation-change` and :ref:`sec-atmosphere-elevation-change`) or
   ice-core derived offsets (sections :ref:`sec-surface-delta-t` and
   :ref:`sec-ocean-delta-sl`, for example). These are called *modifier components* or
   *modifiers*.
@@ -34,10 +34,10 @@ Model components and modifiers can be chained as shown in
 
 .. code-block:: none
 
-    -ocean constant,delta_SL -ocean_delta_SL_file delta_SL.nc
+    -ocean constant,delta_T -ocean_delta_T_file delta_T.nc
 
 combines the component providing constant (both in space and time) ocean boundary
-conditions with a modifier that applies scalar sea level ("SL") offsets. This combination
+conditions with a modifier that applies scalar temperature offsets. This combination
 one of the many ocean models that can be chosen using components as building blocks.
 
 Section :ref:`sec-forcing-examples` gives examples of combining components to choose

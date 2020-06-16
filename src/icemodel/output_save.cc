@@ -1,4 +1,4 @@
-/* Copyright (C) 2017 PISM Authors
+/* Copyright (C) 2017, 2018, 2019 PISM Authors
  *
  * This file is part of PISM.
  *
@@ -19,7 +19,6 @@
 
 #include "IceModel.hh"
 
-#include "pism/util/pism_options.hh"
 #include "pism/util/pism_utilities.hh"
 #include "pism/util/Profiling.hh"
 
@@ -29,7 +28,7 @@ namespace pism {
 MaxTimestep IceModel::save_max_timestep(double my_t) {
 
   if ((not m_save_snapshots) or
-      (not m_config->get_boolean("time_stepping.hit_save_times"))) {
+      (not m_config->get_flag("time_stepping.hit_save_times"))) {
     return MaxTimestep("reporting (-save_times)");
   }
 
@@ -40,35 +39,47 @@ MaxTimestep IceModel::save_max_timestep(double my_t) {
 void IceModel::init_snapshots() {
   m_current_snapshot = 0;
 
-  options::String save_file("-save_file", "Specifies a snapshot filename",
-                            m_snapshots_filename);
-  m_snapshots_filename = save_file;
+  m_snapshots_filename = m_config->get_string("output.snapshot.file");
+  bool filename_set = not m_snapshots_filename.empty();
 
-  options::String save_times("-save_times",
-                             "Gives a list or a MATLAB-style range of times to save snapshots at");
+  auto save_times = m_config->get_string("output.snapshot.times");
+  bool times_set = not save_times.empty();
 
-  bool split = options::Bool("-save_split", "Specifies whether to save snapshots to separate files");
+  bool split = m_config->get_flag("output.snapshot.split");
 
-  m_snapshot_vars = output_variables(m_config->get_string("output.save_size"));
+  m_snapshot_vars = output_variables(m_config->get_string("output.snapshot.size"));
 
-  if (save_file.is_set() ^ save_times.is_set()) {
-    throw RuntimeError(PISM_ERROR_LOCATION, "you need to specify both -save_file and -save_times to save snapshots.");
+  if (filename_set ^ times_set) {
+    throw RuntimeError(PISM_ERROR_LOCATION,
+                       "you need to set both output.snapshot.file and output.snapshot.times"
+                       " to save snapshots.");
   }
 
-  if (!save_file.is_set() && !save_times.is_set()) {
+  if (not filename_set and not times_set) {
     m_save_snapshots = false;
     return;
   }
 
   try {
-    m_time->parse_times(save_times, m_snapshot_times);
+    // parse
+    std::vector<double> times = m_time->parse_times(save_times);
+
+    // discard times before the beginning and after the end of the run
+    m_snapshot_times.clear();
+    for (const auto &t : times) {
+      if (t >= m_time->start() and t <= m_time->end()) {
+        m_snapshot_times.push_back(t);
+      }
+    }
   } catch (RuntimeError &e) {
-    e.add_context("parsing the -save_times argument");
+    e.add_context("processing output.snapshot.times");
     throw;
   }
 
   if (m_snapshot_times.size() == 0) {
-    throw RuntimeError(PISM_ERROR_LOCATION, "no argument for -save_times option.");
+    throw RuntimeError(PISM_ERROR_LOCATION,
+                       "output.snapshot.times was set, but all requested times"
+                       " are outside of the modeled time interval");
   }
 
   m_save_snapshots = true;
@@ -77,7 +88,7 @@ void IceModel::init_snapshots() {
 
   if (split) {
     m_split_snapshots = true;
-  } else if (!ends_with(m_snapshots_filename, ".nc")) {
+  } else if (not ends_with(m_snapshots_filename, ".nc")) {
     m_log->message(2,
                "PISM WARNING: snapshots file name does not have the '.nc' suffix!\n");
   }
@@ -90,7 +101,7 @@ void IceModel::init_snapshots() {
                m_snapshots_filename.c_str());
   }
 
-  m_log->message(2, "times requested: %s\n", save_times->c_str());
+  m_log->message(2, "times requested: %s\n", save_times.c_str());
 }
 
   //! Writes a snapshot of the model state (if necessary)
@@ -142,7 +153,11 @@ void IceModel::write_snapshot() {
   profiling.begin("io.snapshots");
   IO_Mode mode = m_snapshots_file_is_ready ? PISM_READWRITE : PISM_READWRITE_MOVE;
   {
-    PIO file(m_grid->com, m_config->get_string("output.format"), filename, mode);
+    File file(m_grid->com,
+              filename,
+              string_to_backend(m_config->get_string("output.format")),
+              mode,
+              m_ctx->pio_iosys_id());
 
     if (not m_snapshots_file_is_ready) {
       write_metadata(file, WRITE_MAPPING, PREPEND_HISTORY);
@@ -152,7 +167,7 @@ void IceModel::write_snapshot() {
 
     write_run_stats(file);
 
-    save_variables(file, INCLUDE_MODEL_STATE, m_snapshot_vars);
+    save_variables(file, INCLUDE_MODEL_STATE, m_snapshot_vars, m_time->current());
   }
   profiling.end("io.snapshots");
 }

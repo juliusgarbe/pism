@@ -11,12 +11,12 @@
 #include <pism/coupler/atmosphere/Factory.hh>
 #include <pism/coupler/ocean/Factory.hh>
 #include <pism/coupler/surface/Factory.hh>
+#include <pism/hydrology/NullTransport.hh>
 
 #include <pism/util/Time.hh>
 // --------------------------------
 #include <pism/icebin/IBSurfaceModel.hh>
 #include <pism/icebin/MassEnergyBudget.hh>
-#include <pism/icebin/NullTransportHydrology.hh>
 
 // Stuff defined in the icebin library
 // (NOT a dependency of ours)
@@ -91,7 +91,7 @@ private:
 
 private:
   // Utility function
-  void prepare_nc(std::string const &fname, std::unique_ptr<pism::PIO> &nc);
+  void prepare_nc(std::string const &fname, std::unique_ptr<pism::File> &nc);
 
 public:
   /** @param t0 Time of last time we coupled. */
@@ -100,10 +100,10 @@ public:
   void reset_rate();
 
 
-  std::unique_ptr<pism::PIO> pre_mass_nc; //!< Write variables every time massContPostHook() is called.
-  std::unique_ptr<pism::PIO> post_mass_nc;
-  std::unique_ptr<pism::PIO> pre_energy_nc;
-  std::unique_ptr<pism::PIO> post_energy_nc;
+  std::unique_ptr<pism::File> pre_mass_nc; //!< Write variables every time massContPostHook() is called.
+  std::unique_ptr<pism::File> post_mass_nc;
+  std::unique_ptr<pism::File> pre_energy_nc;
+  std::unique_ptr<pism::File> post_energy_nc;
 
   // see iceModel.cc for implementation of constructor and destructor:
   /** @param gcm_params Pointer to IceModel::gcm_params.  Lives at least as long as this object. */
@@ -119,10 +119,10 @@ public:
 
   /** @return Our instance of IBSurfaceModel */
   pism::icebin::IBSurfaceModel *ib_surface_model() {
-    return dynamic_cast<IBSurfaceModel *>(m_surface);
+    return dynamic_cast<IBSurfaceModel *>(m_surface.get());
   }
-  pism::icebin::NullTransportHydrology *null_hydrology() {
-    return dynamic_cast<NullTransportHydrology *>(pism::IceModel::m_subglacial_hydrology);
+  pism::hydrology::NullTransport* null_hydrology() {
+    return dynamic_cast<hydrology::NullTransport *>(pism::IceModel::m_subglacial_hydrology.get());
   }
 
 

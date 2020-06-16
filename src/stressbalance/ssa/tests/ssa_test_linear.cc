@@ -1,4 +1,4 @@
-// Copyright (C) 2010--2017 Ed Bueler, Constantine Khroulev, and David Maxwell
+// Copyright (C) 2010--2018 Ed Bueler, Constantine Khroulev, and David Maxwell
 //
 // This file is part of PISM.
 //
@@ -41,9 +41,9 @@ static char help[] =
 #include "pism/util/VariableMetadata.hh"
 #include "pism/util/error_handling.hh"
 #include "pism/util/iceModelVec.hh"
-#include "pism/util/io/PIO.hh"
+#include "pism/util/io/File.hh"
 #include "pism/util/petscwrappers/PetscInitializer.hh"
-#include "pism/util/pism_const.hh"
+#include "pism/util/pism_utilities.hh"
 #include "pism/util/pism_options.hh"
 #include "pism/verification/tests/exactTestsIJ.h"
 
@@ -62,8 +62,8 @@ public:
     tauc0 = 1.e4;               // 1kPa
 
     // Use a pseudo-plastic law with linear till
-    m_config->set_boolean("basal_resistance.pseudo_plastic.enabled", true);
-    m_config->set_double("basal_resistance.pseudo_plastic.q", 1.0);
+    m_config->set_flag("basal_resistance.pseudo_plastic.enabled", true);
+    m_config->set_number("basal_resistance.pseudo_plastic.q", 1.0);
 
     // The following is irrelevant because we will force linear rheology later.
     m_enthalpyconverter = EnthalpyConverter::Ptr(new EnthalpyConverter(*m_config));
@@ -87,7 +87,7 @@ void SSATestCaseExp::initializeSSACoefficients() {
   m_ssa->strength_extension->set_min_thickness(4000*10);
 
   // The finite difference code uses the following flag to treat the non-periodic grid correctly.
-  m_config->set_boolean("stress_balance.ssa.compute_surface_gradient_inward", true);
+  m_config->set_flag("stress_balance.ssa.compute_surface_gradient_inward", true);
 
   // Set constants for most coefficients.
   m_geometry.ice_thickness.set(H0);
@@ -124,7 +124,7 @@ void SSATestCaseExp::initializeSSACoefficients() {
 
 void SSATestCaseExp::exactSolution(int /*i*/, int /*j*/, double x, double /*y*/,
                                    double *u, double *v) {
-  double tauc_threshold_velocity = m_config->get_double("basal_resistance.pseudo_plastic.u_threshold",
+  double tauc_threshold_velocity = m_config->get_number("basal_resistance.pseudo_plastic.u_threshold",
                                                         "m second-1");
   double v0 = units::convert(m_sys, 100.0, "m year-1", "m second-1");
   // double alpha=log(2.)/(2*L);
@@ -143,7 +143,6 @@ int main(int argc, char *argv[]) {
 
   MPI_Comm com = MPI_COMM_WORLD;  // won't be used except for rank,size
   petsc::Initializer petsc(argc, argv, help);
-  PetscErrorCode ierr;
 
   com = PETSC_COMM_WORLD;
 
@@ -152,26 +151,23 @@ int main(int argc, char *argv[]) {
     Context::Ptr ctx = context_from_options(com, "ssa_test_linear");
     Config::Ptr config = ctx->config();
 
-    bool
-      usage_set = options::Bool("-usage", "print usage info"),
-      help_set  = options::Bool("-help", "print help info");
-    if (usage_set or help_set) {
-      ierr = PetscPrintf(com,
-                         "\n"
-                         "usage:\n"
-                         "  run %s -Mx <number> -My <number> -ssa_method <fd|fem>\n"
-                         "\n",argv[0]);
-      PISM_CHK(ierr, "PetscPrintf");
+    std::string usage = "\n"
+      "usage:\n"
+      "  run ssa_test_linear -Mx <number> -My <number> -ssa_method <fd|fem>\n"
+      "\n";
+
+    bool stop = show_usage_check_req_opts(*ctx->log(), "ssa_test_linear", {}, usage);
+
+    if (stop) {
+      return 0;
     }
 
     // Parameters that can be overridden by command line options
-    unsigned int Mx = config->get_double("grid.Mx");
-    unsigned int My = config->get_double("grid.My");
+    unsigned int Mx = config->get_number("grid.Mx");
+    unsigned int My = config->get_number("grid.My");
 
-    options::Keyword method("-ssa_method", "Algorithm for computing the SSA solution",
-                            "fem,fd", "fem");
-
-    options::String output_file("-o", "Set the output file name", "ssa_test_linear.nc");
+    auto method      = config->get_string("stress_balance.ssa.method");
+    auto output_file = config->get_string("output.file_name");
 
     // Determine the kind of solver to use.
     SSAFactory ssafactory = NULL;

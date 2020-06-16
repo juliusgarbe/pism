@@ -2,13 +2,15 @@
 
 #include <pism/energy/BedThermalUnit.hh>
 #include <pism/util/EnthalpyConverter.hh>
-#include <pism/util/io/PIO.hh>
+#include <pism/util/io/File.hh>
 #include <pism/util/io/io_helpers.hh>
 #include "pism/energy/EnergyModel.hh"
 
 #include "pism/icebin/IBIceModel.hh"
 #include "pism/icebin/IBSurfaceModel.hh"
 
+#include "pism/coupler/SeaLevel.hh"
+#include "pism/coupler/ocean/sea_level/Initialization.hh"
 
 namespace pism {
 namespace icebin {
@@ -32,9 +34,9 @@ void IBIceModel::allocate_subglacial_hydrology() {
     return; // indicates it has already been allocated
   }
 
-  m_subglacial_hydrology = new pism::icebin::NullTransportHydrology(m_grid);
+  m_subglacial_hydrology.reset(new pism::hydrology::NullTransport(m_grid));
 
-  m_submodels["subglacial hydrology"] = m_subglacial_hydrology;
+  m_submodels["subglacial hydrology"] = m_subglacial_hydrology.get();
 
   printf("END IBIceModel::allocate_subglacial_hydrology()\n");
 }
@@ -42,28 +44,30 @@ void IBIceModel::allocate_subglacial_hydrology() {
 
 void IBIceModel::allocate_couplers() {
   // Initialize boundary models:
-  atmosphere::Factory pa(m_grid);
-  ocean::Factory po(m_grid);
-  atmosphere::AtmosphereModel *atmosphere;
 
-  if (m_surface == NULL) {
+  if (not m_surface) {
 
     m_log->message(2, "# Allocating a surface process model or coupler...\n");
 
-    m_surface                = new IBSurfaceModel(m_grid);
+    m_surface.reset(new IBSurfaceModel(m_grid));
 
-    atmosphere = pa.create();
-    m_surface->attach_atmosphere_model(atmosphere);
-
-    m_submodels["surface process model"] = m_surface;
+    m_submodels["surface process model"] = m_surface.get();
   }
 
-  if (m_ocean == NULL) {
+  if (not m_ocean) {
     m_log->message(2, "# Allocating an ocean model or coupler...\n");
 
+    ocean::Factory po(m_grid);
     m_ocean = po.create();
 
-    m_submodels["ocean model"] = m_ocean;
+    m_submodels["ocean model"] = m_ocean.get();
+  }
+
+  if (not m_sea_level) {
+    using namespace ocean::sea_level;
+    std::shared_ptr<SeaLevel> sea_level(new SeaLevel(m_grid));
+    m_sea_level.reset(new InitializationHelper(m_grid, sea_level));
+    m_submodels["sea level forcing"] = m_sea_level.get();
   }
 }
 
@@ -139,7 +143,7 @@ void IBIceModel::massContExplicitStep(double dt,
 
   printf("BEGIN IBIceModel::MassContExplicitStep()\n");
 
-  _ice_density              = m_config->get_double("constants.ice.density");
+  _ice_density              = m_config->get_number("constants.ice.density");
   _meter_per_s_to_kg_per_m2 = dt * _ice_density;
 
 
@@ -234,18 +238,21 @@ void IBIceModel::accumulateFluxes_massContExplicitStep(int i, int j,
 }
 
 
-void IBIceModel::prepare_nc(std::string const &fname, std::unique_ptr<PIO> &nc) {
+void IBIceModel::prepare_nc(std::string const &fname, std::unique_ptr<File> &nc) {
 
-  //    nc.reset(new PIO(m_grid->com, m_grid->ctx()->config()->get_string("output.format")));
+  //    nc.reset(new File(m_grid->com, m_grid->ctx()->config()->get_string("output.format")));
 
-  nc.reset(new PIO(m_grid->com, m_config->get_string("output.format"),
-                   fname, PISM_READWRITE_MOVE));
+  nc.reset(new File(m_grid->com,
+                    fname,
+                    string_to_backend(m_config->get_string("output.format")),
+                    PISM_READWRITE_MOVE,
+                    m_grid->ctx()->pio_iosys_id()));
 
   io::define_time(*nc, m_grid->ctx()->config()->get_string("time.dimension_name"), m_grid->ctx()->time()->calendar(),
                   m_grid->ctx()->time()->CF_units_string(), m_grid->ctx()->unit_system());
 
   // These are in iMtimseries, but not listed as required in iceModelVec.hh
-  //    nc->put_att_text(m_config.get_string("time.dimension_name"),
+  //    nc->write_attribute(m_config.get_string("time.dimension_name"),
   //                           "bounds", "time_bounds");
   //    write_metadata(nc, true, false);
   //  nc->close():
@@ -339,7 +346,7 @@ void IBIceModel::prepare_outputs(double t0) {
 }
 
 void IBIceModel::prepare_initial_outputs() {
-  double ice_density = m_config->get_double("constants.ice.density", "kg m-3");
+  double ice_density = m_config->get_number("constants.ice.density", "kg m-3");
 
   const IceModelVec3 &ice_enthalpy = m_energy_model->enthalpy();
 
@@ -413,7 +420,7 @@ the idea from IceModel::get_threshold_thickness(...) (iMpartm_grid->cc).  */
 
 void IBIceModel::compute_enth2(pism::IceModelVec2S &enth2, pism::IceModelVec2S &mass2) {
   //   getInternalColumn() is allocated already
-  double ice_density = m_config->get_double("constants.ice.density", "kg m-3");
+  double ice_density = m_config->get_number("constants.ice.density", "kg m-3");
 
   const IceModelVec3 *ice_enthalpy = &m_energy_model->enthalpy();
 
@@ -463,7 +470,7 @@ void IBIceModel::construct_surface_temp(
   printf("BEGIN IBIceModel::merge_surface_temp default_val=%g\n", default_val);
   EnthalpyConverter::Ptr EC = ctx()->enthalpy_converter();
 
-  double ice_density = m_config->get_double("constants.ice.density");
+  double ice_density = m_config->get_number("constants.ice.density");
 
   const IceModelVec3 &ice_enthalpy = m_energy_model->enthalpy();
 

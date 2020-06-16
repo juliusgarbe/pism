@@ -1,4 +1,4 @@
-// Copyright (C) 2010--2017 Ed Bueler, Constantine Khroulev, and David Maxwell
+// Copyright (C) 2010--2018 Ed Bueler, Constantine Khroulev, and David Maxwell
 //
 // This file is part of PISM.
 //
@@ -33,9 +33,9 @@ static char help[] =
 #include "pism/util/VariableMetadata.hh"
 #include "pism/util/error_handling.hh"
 #include "pism/util/iceModelVec.hh"
-#include "pism/util/io/PIO.hh"
+#include "pism/util/io/File.hh"
 #include "pism/util/petscwrappers/PetscInitializer.hh"
-#include "pism/util/pism_const.hh"
+#include "pism/util/pism_utilities.hh"
 #include "pism/util/pism_options.hh"
 
 namespace pism {
@@ -61,10 +61,10 @@ public:
     H0 = 600.0;                 // meters
     C  = 2.45e-18;
 
-    m_config->set_double("flow_law.isothermal_Glen.ice_softness",
-                         pow(1.9e8, -m_config->get_double("stress_balance.ssa.Glen_exponent")));
-    m_config->set_boolean("stress_balance.ssa.compute_surface_gradient_inward", false);
-    m_config->set_boolean("stress_balance.calving_front_stress_bc", true);
+    m_config->set_number("flow_law.isothermal_Glen.ice_softness",
+                         pow(1.9e8, -m_config->get_number("stress_balance.ssa.Glen_exponent")));
+    m_config->set_flag("stress_balance.ssa.compute_surface_gradient_inward", false);
+    m_config->set_flag("stress_balance.calving_front_stress_bc", true);
     m_config->set_string("stress_balance.ssa.flow_law", "isothermal_glen");
 
     m_enthalpyconverter = EnthalpyConverter::Ptr(new EnthalpyConverter(*m_config));
@@ -104,8 +104,8 @@ void SSATestCaseCFBC::initializeSSACoefficients() {
   IceModelVec::AccessList list{&m_geometry.ice_thickness,
       &m_geometry.ice_surface_elevation, &m_bc_mask, &m_bc_values, &m_geometry.cell_type};
 
-  double ocean_rho = m_config->get_double("constants.sea_water.density"),
-    ice_rho = m_config->get_double("constants.ice.density");
+  double ocean_rho = m_config->get_number("constants.sea_water.density"),
+    ice_rho = m_config->get_number("constants.ice.density");
 
   const double x_min = m_grid->x(0);
 
@@ -172,7 +172,6 @@ int main(int argc, char *argv[]) {
 
   MPI_Comm com = MPI_COMM_WORLD;
   petsc::Initializer petsc(argc, argv, help);
-  PetscErrorCode ierr;
 
   com = PETSC_COMM_WORLD;
 
@@ -181,26 +180,23 @@ int main(int argc, char *argv[]) {
     Context::Ptr ctx = context_from_options(com, "ssa_test_cfbc");
     Config::Ptr config = ctx->config();
 
-    bool
-      usage_set = options::Bool("-usage", "print usage info"),
-      help_set  = options::Bool("-help", "print help info");
-    if (usage_set or help_set) {
-      ierr = PetscPrintf(com,
-                         "\n"
-                         "usage of SSA_TEST_CFBC:\n"
-                         "  run ssa_test_cfbc -Mx <number> -My <number>\n"
-                         "\n");
-      PISM_CHK(ierr, "PetscPrintf");
+    std::string usage = "\n"
+      "usage of SSA_TEST_CFBC:\n"
+      "  run ssa_test_cfbc -Mx <number> -My <number>\n"
+      "\n";
+
+    bool stop = show_usage_check_req_opts(*ctx->log(), "ssa_test_cfbc", {}, usage);
+
+    if (stop) {
+      return 0;
     }
 
     // Parameters that can be overridden by command line options
-    unsigned int Mx = config->get_double("grid.Mx");
-    unsigned int My = config->get_double("grid.My");
+    unsigned int Mx = config->get_number("grid.Mx");
+    unsigned int My = config->get_number("grid.My");
 
-    options::Keyword method("-ssa_method", "Algorithm for computing the SSA solution",
-                            "fem,fd", "fd");
-
-    options::String output_file("-o", "Set the output file name", "ssa_test_cfbc.nc");
+    auto method = config->get_string("stress_balance.ssa.method");
+    auto output_file = config->get_string("output.file_name");
 
     // Determine the kind of solver to use.
     SSAFactory ssafactory = NULL;

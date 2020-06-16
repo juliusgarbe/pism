@@ -3,7 +3,7 @@
 try:
     from netCDF4 import Dataset as NC
 except:
-    print "netCDF4 is not installed!"
+    print("netCDF4 is not installed!")
     sys.exit(1)
 
 import MISMIP
@@ -73,10 +73,14 @@ def pism_bootstrap_file(filename, experiment, step, mode,
     xx = x(mode, N)
     yy = y(xx)
 
-    topg = bed_topography(experiment, xx)
-    thk = thickness(experiment, step, xx, calving_front, semianalytical_profile)
-    smb = surface_mass_balance(xx)
-    temp = ice_surface_temp(xx)
+    bed_elevation = bed_topography(experiment, xx)
+    ice_thickness = thickness(experiment, step, xx, calving_front, semianalytical_profile)
+    ice_surface_mass_balance = surface_mass_balance(xx)
+    ice_surface_temperature = ice_surface_temp(xx)
+
+    ice_extent = np.zeros_like(ice_thickness)
+    ice_extent[ice_thickness > 0] = 1
+    ice_extent[bed_elevation > 0] = 1
 
     nc = PISMNC.PISMDataset(filename, 'w', format="NETCDF3_CLASSIC")
 
@@ -86,26 +90,32 @@ def pism_bootstrap_file(filename, experiment, step, mode,
                        attrs={'units': 'm',
                               'long_name': 'bedrock surface elevation',
                               'standard_name': 'bedrock_altitude'})
-    nc.write('topg', topg)
+    nc.write('topg', bed_elevation)
 
     nc.define_2d_field('thk',
                        attrs={'units': 'm',
                               'long_name': 'ice thickness',
                               'standard_name': 'land_ice_thickness'})
-    nc.write('thk', thk)
+    nc.write('thk', ice_thickness)
 
     nc.define_2d_field('climatic_mass_balance',
                        attrs={'units': 'kg m-2 / s',
                               'long_name': 'ice-equivalent surface mass balance (accumulation/ablation) rate',
                               'standard_name': 'land_ice_surface_specific_mass_balance_flux'})
-    nc.write('climatic_mass_balance', smb)
+    nc.write('climatic_mass_balance', ice_surface_mass_balance)
 
     nc.define_2d_field('ice_surface_temp',
                        attrs={'units': 'Kelvin',
                               'long_name': 'annual average ice surface temperature, below firn processes'})
-    nc.write('ice_surface_temp', temp)
+    nc.write('ice_surface_temp', ice_surface_temperature)
+
+    nc.define_2d_field('land_ice_area_fraction_retreat',
+                       attrs={'units': '1',
+                              'long_name': 'mask defining the maximum ice extent'})
+    nc.write('land_ice_area_fraction_retreat', ice_extent)
 
     nc.close()
+
 
 if __name__ == "__main__":
 
@@ -136,8 +146,8 @@ if __name__ == "__main__":
 
     experiments = ('1a', '1b', '2a', '2b', '3a', '3b')
     if opts.experiment not in experiments:
-        print "Invalid experiment %s. Has to be one of %s." % (
-            opts.experiment, experiments)
+        print("Invalid experiment %s. Has to be one of %s." % (
+            opts.experiment, experiments))
         exit(1)
 
     if not opts.output_filename:
@@ -147,8 +157,8 @@ if __name__ == "__main__":
     else:
         output_filename = opts.output_filename
 
-    print "Creating MISMIP setup for experiment %s, step %s, grid mode %d in %s..." % (
-        opts.experiment, opts.step, opts.mode, output_filename)
+    print("Creating MISMIP setup for experiment %s, step %s, grid mode %d in %s..." % (
+        opts.experiment, opts.step, opts.mode, output_filename))
 
     pism_bootstrap_file(output_filename,
                         opts.experiment,
@@ -158,4 +168,4 @@ if __name__ == "__main__":
                         N=opts.N,
                         semianalytical_profile=opts.semianalytical_profile)
 
-    print "done."
+    print("done.")

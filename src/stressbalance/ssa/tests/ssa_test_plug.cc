@@ -1,4 +1,4 @@
-// Copyright (C) 2010--2017 Ed Bueler, Constantine Khroulev, and David Maxwell
+// Copyright (C) 2010--2018 Ed Bueler, Constantine Khroulev, and David Maxwell
 //
 // This file is part of PISM.
 //
@@ -39,9 +39,9 @@ static char help[] =
 #include "pism/util/VariableMetadata.hh"
 #include "pism/util/error_handling.hh"
 #include "pism/util/iceModelVec.hh"
-#include "pism/util/io/PIO.hh"
+#include "pism/util/io/File.hh"
 #include "pism/util/petscwrappers/PetscInitializer.hh"
-#include "pism/util/pism_const.hh"
+#include "pism/util/pism_utilities.hh"
 #include "pism/util/pism_options.hh"
 #include "pism/verification/tests/exactTestsIJ.h"
 
@@ -70,7 +70,7 @@ public:
 
     // Use constant hardness
     m_config->set_string("stress_balance.ssa.flow_law", "isothermal_glen");
-    m_config->set_double("flow_law.isothermal_Glen.ice_softness", pow(B0, -glen_n));
+    m_config->set_number("flow_law.isothermal_Glen.ice_softness", pow(B0, -glen_n));
 
     m_ssa = ssafactory(m_grid);
   }
@@ -96,8 +96,8 @@ protected:
 void SSATestCasePlug::initializeSSACoefficients() {
 
   // The finite difference code uses the following flag to treat the non-periodic grid correctly.
-  m_config->set_boolean("stress_balance.ssa.compute_surface_gradient_inward", true);
-  m_config->set_double("stress_balance.ssa.epsilon", 0.0);
+  m_config->set_flag("stress_balance.ssa.compute_surface_gradient_inward", true);
+  m_config->set_number("stress_balance.ssa.epsilon", 0.0);
 
   // Ensure we never use the strength extension.
   m_ssa->strength_extension->set_min_thickness(H0/2);
@@ -139,8 +139,8 @@ void SSATestCasePlug::initializeSSACoefficients() {
 void SSATestCasePlug::exactSolution(int /*i*/, int /*j*/,
                                     double /*x*/, double y,
                                     double *u, double *v) {
-  double earth_grav = m_config->get_double("constants.standard_gravity"),
-    ice_rho = m_config->get_double("constants.ice.density");
+  double earth_grav = m_config->get_number("constants.standard_gravity"),
+    ice_rho = m_config->get_number("constants.ice.density");
   double f = ice_rho * earth_grav * H0* dhdx;
   double ynd = y/L;
 
@@ -158,7 +158,6 @@ int main(int argc, char *argv[]) {
 
   MPI_Comm com = MPI_COMM_WORLD;  // won't be used except for rank,size
   petsc::Initializer petsc(argc, argv, help);
-  PetscErrorCode ierr;
 
   com = PETSC_COMM_WORLD;
 
@@ -167,28 +166,25 @@ int main(int argc, char *argv[]) {
     Context::Ptr ctx = context_from_options(com, "ssa_test_plug");
     Config::Ptr config = ctx->config();
 
-    bool
-      usage_set = options::Bool("-usage", "show the usage message"),
-      help_set  = options::Bool("-help", "show the help message");
-    if (usage_set or help_set) {
-      ierr = PetscPrintf(com,
-                         "\n"
-                         "usage of SSA_TEST_PLUG:\n"
-                         "  run ssa_test_plug -Mx <number> -My <number> -ssa_method <fd|fem>\n"
-                         "\n");
-      PISM_CHK(ierr, "PetscPrintf");
+    std::string usage = "\n"
+      "usage of SSA_TEST_PLUG:\n"
+      "  run ssa_test_plug -Mx <number> -My <number> -ssa_method <fd|fem>\n"
+      "\n";
+
+    bool stop = show_usage_check_req_opts(*ctx->log(), "ssa_test_plug", {}, usage);
+
+    if (stop) {
+      return 0;
     }
 
     // Parameters that can be overridden by command line options
 
-    unsigned int Mx = config->get_double("grid.Mx");
-    unsigned int My = config->get_double("grid.My");
+    unsigned int Mx = config->get_number("grid.Mx");
+    unsigned int My = config->get_number("grid.My");
 
-    options::Keyword method("-ssa_method", "Algorithm for computing the SSA solution",
-                            "fem,fd", "fem");
-
-    options::String output_file("-o", "Set the output file name", "ssa_test_plug.nc");
-    options::Real glen_n("-ssa_glen_n", "Glen exponent for the SSA", 3.0);
+    auto method      = config->get_string("stress_balance.ssa.method");
+    auto output_file = config->get_string("output.file_name");
+    auto glen_n      = config->get_number("stress_balance.ssa.Glen_exponent");
 
     // Determine the kind of solver to use.
     SSAFactory ssafactory = NULL;

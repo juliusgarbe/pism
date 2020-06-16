@@ -1,4 +1,4 @@
-// Copyright (C) 2010, 2011, 2012, 2013, 2014, 2015, 2016, 2017 Ed Bueler and Constantine Khroulev
+// Copyright (C) 2010, 2011, 2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019 Ed Bueler and Constantine Khroulev
 //
 // This file is part of PISM.
 //
@@ -25,7 +25,7 @@
 #include "pism/util/IceModelVec2CellType.hh"
 
 #include "pism/util/error_handling.hh"
-#include "pism/util/pism_const.hh"
+#include "pism/util/pism_utilities.hh"
 #include "pism/util/Logger.hh"
 
 namespace pism {
@@ -41,24 +41,24 @@ BedSmoother::BedSmoother(IceGrid::ConstPtr g, int MAX_GHOSTS)
     //   their prospective uses
     m_topgsmooth.create(m_grid, "topgsmooth", WITH_GHOSTS, MAX_GHOSTS);
     m_topgsmooth.set_attrs("bed_smoother_tool",
-                         "smoothed bed elevation, in bed roughness parameterization",
-                         "m", "");
+                           "smoothed bed elevation, in bed roughness parameterization",
+                           "m", "m", "", 0);
     m_maxtl.create(m_grid, "maxtl", WITH_GHOSTS, MAX_GHOSTS);
     m_maxtl.set_attrs("bed_smoother_tool",
-                    "maximum elevation in local topography patch, in bed roughness parameterization",
-                    "m", "");
+                      "maximum elevation in local topography patch, in bed roughness parameterization",
+                      "m", "m", "", 0);
     m_C2.create(m_grid, "C2bedsmooth", WITH_GHOSTS, MAX_GHOSTS);
     m_C2.set_attrs("bed_smoother_tool",
-                 "polynomial coeff of H^-2, in bed roughness parameterization",
-                 "m2", "");
+                   "polynomial coeff of H^-2, in bed roughness parameterization",
+                   "m2", "m2", "", 0);
     m_C3.create(m_grid, "C3bedsmooth", WITH_GHOSTS, MAX_GHOSTS);
     m_C3.set_attrs("bed_smoother_tool",
-                 "polynomial coeff of H^-3, in bed roughness parameterization",
-                 "m3", "");
+                   "polynomial coeff of H^-3, in bed roughness parameterization",
+                   "m3", "m3", "", 0);
     m_C4.create(m_grid, "C4bedsmooth", WITH_GHOSTS, MAX_GHOSTS);
     m_C4.set_attrs("bed_smoother_tool",
-                 "polynomial coeff of H^-4, in bed roughness parameterization",
-                 "m4", "");
+                   "polynomial coeff of H^-4, in bed roughness parameterization",
+                   "m4", "m4", "", 0);
 
     // allocate Vecs that live on processor 0:
     m_topgp0 = m_topgsmooth.allocate_proc0_copy();
@@ -69,8 +69,8 @@ BedSmoother::BedSmoother(IceGrid::ConstPtr g, int MAX_GHOSTS)
     m_C4p0 = m_C4.allocate_proc0_copy();
   }
 
-  m_Glen_exponent = m_config->get_double("stress_balance.sia.Glen_exponent"); // choice is SIA; see #285
-  m_smoothing_range = m_config->get_double("stress_balance.sia.bed_smoother_range");
+  m_Glen_exponent = m_config->get_number("stress_balance.sia.Glen_exponent"); // choice is SIA; see #285
+  m_smoothing_range = m_config->get_number("stress_balance.sia.bed_smoother.range");
 
   if (m_smoothing_range > 0.0) {
     log.message(2,
@@ -288,12 +288,12 @@ void BedSmoother::smoothed_thk(const IceModelVec2S &usurf,
 
   IceModelVec::AccessList list{&mask, &m_maxtl, &result, &thk, &m_topgsmooth, &usurf};
 
-  unsigned int GHOSTS = result.get_stencil_width();
-  assert(mask.get_stencil_width()         >= GHOSTS);
-  assert(m_maxtl.get_stencil_width()      >= GHOSTS);
-  assert(thk.get_stencil_width()          >= GHOSTS);
-  assert(m_topgsmooth.get_stencil_width() >= GHOSTS);
-  assert(usurf.get_stencil_width()        >= GHOSTS);
+  unsigned int GHOSTS = result.stencil_width();
+  assert(mask.stencil_width()         >= GHOSTS);
+  assert(m_maxtl.stencil_width()      >= GHOSTS);
+  assert(thk.stencil_width()          >= GHOSTS);
+  assert(m_topgsmooth.stencil_width() >= GHOSTS);
+  assert(usurf.stencil_width()        >= GHOSTS);
 
   ParallelSection loop(m_grid->com);
   try {
@@ -357,13 +357,17 @@ void BedSmoother::theta(const IceModelVec2S &usurf, IceModelVec2S &result) const
 
   IceModelVec::AccessList list{&m_C2, &m_C3, &m_C4, &m_maxtl, &result, &m_topgsmooth, &usurf};
 
-  unsigned int GHOSTS = result.get_stencil_width();
-  assert(m_C2.get_stencil_width()         >= GHOSTS);
-  assert(m_C3.get_stencil_width()         >= GHOSTS);
-  assert(m_C4.get_stencil_width()         >= GHOSTS);
-  assert(m_maxtl.get_stencil_width()      >= GHOSTS);
-  assert(m_topgsmooth.get_stencil_width() >= GHOSTS);
-  assert(usurf.get_stencil_width()        >= GHOSTS);
+  unsigned int GHOSTS = result.stencil_width();
+  assert(m_C2.stencil_width()         >= GHOSTS);
+  assert(m_C3.stencil_width()         >= GHOSTS);
+  assert(m_C4.stencil_width()         >= GHOSTS);
+  assert(m_maxtl.stencil_width()      >= GHOSTS);
+  assert(m_topgsmooth.stencil_width() >= GHOSTS);
+  assert(usurf.stencil_width()        >= GHOSTS);
+
+  const double
+    theta_min = m_config->get_number("stress_balance.sia.bed_smoother.theta_min"),
+    theta_max = 1.0;
 
   ParallelSection loop(m_grid->com);
   try {
@@ -387,16 +391,11 @@ void BedSmoother::theta(const IceModelVec2S &usurf, IceModelVec2S &result) const
         }
 
         result(i, j) = pow(omega, -m_Glen_exponent);
-        // now guarantee in [0,1]; this check *should not* be necessary, by convexity of p4
-        if (result(i, j) > 1.0) {
-          result(i, j) = 1.0;
-        }
-        if (result(i, j) < 0.0) {
-          result(i, j) = 0.0;
-        }
       } else {
-        result(i, j) = 0.00;  // FIXME = min_theta; make configurable
+        result(i, j) = 0.00;
       }
+
+      result(i, j) = clip(result(i, j), theta_min, theta_max);
     }
   } catch (...) {
     loop.failed();

@@ -1,4 +1,4 @@
-// Copyright (C) 2004-2017 Jed Brown, Ed Bueler and Constantine Khroulev
+// Copyright (C) 2004-2019 PISM Authors
 //
 // This file is part of PISM.
 //
@@ -20,13 +20,12 @@
 #include <fstream>
 #include <iostream>
 
-#include "pism/util/pism_const.hh"
+#include "pism/util/pism_utilities.hh"
 #include "pism/util/iceModelVec.hh"
 #include "ColumnSystem.hh"
 
 #include "pism/util/error_handling.hh"
 #include "pism/util/ColumnInterpolation.hh"
-#include "pism/util/pism_utilities.hh"
 
 namespace pism {
 
@@ -47,8 +46,8 @@ with the last row
 Thus the index into the arrays L, D, U is always the row number.
  */
 TridiagonalSystem::TridiagonalSystem(unsigned int max_size,
-                                     const std::string &my_prefix)
-  : m_max_system_size(max_size), m_prefix(my_prefix) {
+                                     const std::string &prefix)
+  : m_max_system_size(max_size), m_prefix(prefix) {
   assert(m_max_system_size >= 1 && m_max_system_size < 1e6);
 
   m_L.resize(m_max_system_size);
@@ -60,7 +59,7 @@ TridiagonalSystem::TridiagonalSystem(unsigned int max_size,
 
 //! Zero all entries.
 void TridiagonalSystem::reset() {
-#if PISM_DEBUG==1
+#if Pism_DEBUG==1
   memset(&m_L[0],    0, (m_max_system_size)*sizeof(double));
   memset(&m_U[0],    0, (m_max_system_size)*sizeof(double));
   memset(&m_D[0],    0, (m_max_system_size)*sizeof(double));
@@ -194,6 +193,13 @@ void TridiagonalSystem::save_system_with_solution(const std::string &filename,
 }
 
 
+void TridiagonalSystem::solve(unsigned int system_size, std::vector<double> &result) {
+  result.resize(m_max_system_size);
+
+  solve(system_size, result.data());
+}
+
+
 //! The actual code for solving a tridiagonal system.
 /*!
 This is modified slightly from a Numerical Recipes version.
@@ -202,15 +208,13 @@ Input size n is size of instance.  Requires n <= TridiagonalSystem::m_max_system
 
 Solution of system in x.
  */
-void TridiagonalSystem::solve(unsigned int system_size, std::vector<double> &result) {
+void TridiagonalSystem::solve(unsigned int system_size, double *result) {
   assert(system_size >= 1);
   assert(system_size <= m_max_system_size);
 
   if (m_D[0] == 0.0) {
     throw RuntimeError(PISM_ERROR_LOCATION, "zero pivot at row 1");
   }
-
-  result.resize(m_max_system_size);
 
   double b = m_D[0];
 
@@ -323,7 +327,7 @@ void columnSystemCtx::init_column(int i, int j,
   m_solver->reset();
 
   // post-condition
-#if PISM_DEBUG==1
+#if Pism_DEBUG==1
   // check if m_ks is valid
   if (m_ks >= m_z.size()) {
     throw RuntimeError::formatted(PISM_ERROR_LOCATION, "ks = %d computed at i = %d, j = %d is invalid,\n"
@@ -335,9 +339,9 @@ void columnSystemCtx::init_column(int i, int j,
 
 //! Write system matrix and right-hand-side into an Python script.  The file name contains ZERO_PIVOT_ERROR.
 void columnSystemCtx::reportColumnZeroPivotErrorMFile(unsigned int M) {
-  char filename[TEMPORARY_STRING_LENGTH];
-  snprintf(filename, sizeof(filename), "%s_i%d_j%d_ZERO_PIVOT_ERROR.py",
-           m_solver->prefix().c_str(), m_i, m_j);
+
+  auto filename = pism::printf("%s_i%d_j%d_ZERO_PIVOT_ERROR.py",
+                               m_solver->prefix().c_str(), m_i, m_j);
 
   std::ofstream output(filename);
   output << "# system has 1-norm = " << m_solver->norm1(M)
@@ -351,8 +355,7 @@ void columnSystemCtx::reportColumnZeroPivotErrorMFile(unsigned int M) {
 //! solution into Python script. Constructs file name from m_prefix.
 void columnSystemCtx::save_to_file(const std::vector<double> &x) {
 
-  char filename[TEMPORARY_STRING_LENGTH];
-  snprintf(filename, sizeof(filename), "%s_i%d_j%d.py", m_solver->prefix().c_str(), m_i, m_j);
+  auto filename = pism::printf("%s_i%d_j%d.py", m_solver->prefix().c_str(), m_i, m_j);
 
   std::cout << "saving "
             << m_solver->prefix() << " column system at (i,j)"

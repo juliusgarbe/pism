@@ -1,4 +1,4 @@
-// Copyright (C) 2009--2017 Jed Brown and Ed Bueler and Constantine Khroulev and David Maxwell
+// Copyright (C) 2009--2019 Jed Brown and Ed Bueler and Constantine Khroulev and David Maxwell
 //
 // This file is part of PISM.
 //
@@ -47,9 +47,9 @@ SSAFEM::SSAFEM(IceGrid::ConstPtr g)
     m_element(*g),
     m_quadrature(g->dx(), g->dy(), 1.0) {
 
-  const double ice_density = m_config->get_double("constants.ice.density");
-  m_alpha = 1 - ice_density / m_config->get_double("constants.sea_water.density");
-  m_rho_g = ice_density * m_config->get_double("constants.standard_gravity");
+  const double ice_density = m_config->get_number("constants.ice.density");
+  m_alpha = 1 - ice_density / m_config->get_number("constants.sea_water.density");
+  m_rho_g = ice_density * m_config->get_number("constants.standard_gravity");
 
   m_driving_stress_x = NULL;
   m_driving_stress_y = NULL;
@@ -57,7 +57,7 @@ SSAFEM::SSAFEM(IceGrid::ConstPtr g)
   PetscErrorCode ierr;
 
   m_dirichletScale = 1.0;
-  m_beta_ice_free_bedrock = m_config->get_double("basal_resistance.beta_ice_free_bedrock");
+  m_beta_ice_free_bedrock = m_config->get_number("basal_resistance.beta_ice_free_bedrock");
 
   ierr = SNESCreate(m_grid->com, m_snes.rawptr());
   PISM_CHK(ierr, "SNESCreate");
@@ -100,14 +100,14 @@ SSAFEM::SSAFEM(IceGrid::ConstPtr g)
   m_node_type.create(m_grid, "node_type", WITH_GHOSTS, 1);
   m_node_type.set_attrs("internal", // intent
                         "node types: interior, boundary, exterior", // long name
-                        "", ""); // no units or standard name
+                        "", "", "", 0); // no units or standard name
 
   // ElementMap::nodal_values() expects a ghosted IceModelVec2S. Ghosts if this field are never
   // assigned to and not communocated, though.
   m_boundary_integral.create(m_grid, "boundary_integral", WITH_GHOSTS, 1);
   m_boundary_integral.set_attrs("internal", // intent
                                 "residual contribution from lateral boundaries", // long name
-                                "", ""); // no units or standard name
+                                "", "", "", 0); // no units or standard name
 }
 
 SSA* SSAFEMFactory(IceGrid::ConstPtr g) {
@@ -188,7 +188,7 @@ TerminationReason::Ptr SSAFEM::solve_with_reason(const Inputs &inputs) {
 TerminationReason::Ptr SSAFEM::solve_nocache() {
   PetscErrorCode ierr;
 
-  m_epsilon_ssa = m_config->get_double("stress_balance.ssa.epsilon");
+  m_epsilon_ssa = m_config->get_number("stress_balance.ssa.epsilon");
 
   options::String filename("-ssa_view", "");
   if (filename.is_set()) {
@@ -205,7 +205,7 @@ TerminationReason::Ptr SSAFEM::solve_nocache() {
     ierr = PetscViewerASCIIPrintf(viewer, "solution vector before SSASolve_FE\n");
     PISM_CHK(ierr, "PetscViewerASCIIPrintf");
 
-    ierr = VecView(m_velocity_global.get_vec(), viewer);
+    ierr = VecView(m_velocity_global.vec(), viewer);
     PISM_CHK(ierr, "VecView");
   }
 
@@ -215,7 +215,7 @@ TerminationReason::Ptr SSAFEM::solve_nocache() {
   }
 
   // Solve:
-  ierr = SNESSolve(m_snes, NULL, m_velocity_global.get_vec());
+  ierr = SNESSolve(m_snes, NULL, m_velocity_global.vec());
   PISM_CHK(ierr, "SNESSolve");
 
   // See if it worked.
@@ -238,7 +238,7 @@ TerminationReason::Ptr SSAFEM::solve_nocache() {
       ierr = PetscViewerASCIIPrintf(viewer, "solution vector after SSASolve\n");
       PISM_CHK(ierr, "PetscViewerASCIIPrintf");
 
-      ierr = VecView(m_velocity_global.get_vec(), viewer);
+      ierr = VecView(m_velocity_global.vec(), viewer);
       PISM_CHK(ierr, "VecView");
     }
 
@@ -272,6 +272,7 @@ void SSAFEM::cache_inputs(const Inputs &inputs) {
       inputs.enthalpy,
       &inputs.geometry->ice_thickness,
       &inputs.geometry->bed_elevation,
+      &inputs.geometry->sea_level_elevation,
       inputs.basal_yield_stress};
 
   bool use_explicit_driving_stress = (m_driving_stress_x != NULL) && (m_driving_stress_y != NULL);
@@ -303,7 +304,7 @@ void SSAFEM::cache_inputs(const Inputs &inputs) {
       Coefficients c;
       c.thickness      = thickness;
       c.bed            = inputs.geometry->bed_elevation(i, j);
-      c.sea_level      = inputs.sea_level; // FIXME: use a 2D field
+      c.sea_level      = inputs.geometry->sea_level_elevation(i, j);
       c.tauc           = (*inputs.basal_yield_stress)(i, j);
       c.hardness       = hardness;
       c.driving_stress = tau_d;
@@ -317,11 +318,11 @@ void SSAFEM::cache_inputs(const Inputs &inputs) {
 
   m_coefficients.update_ghosts();
 
-  const bool use_cfbc = m_config->get_boolean("stress_balance.calving_front_stress_bc");
+  const bool use_cfbc = m_config->get_flag("stress_balance.calving_front_stress_bc");
   if (use_cfbc) {
     // Note: the call below uses ghosts of inputs.geometry->ice_thickness.
     compute_node_types(inputs.geometry->ice_thickness,
-                       m_config->get_double("stress_balance.ice_free_thickness_standard"),
+                       m_config->get_number("stress_balance.ice_free_thickness_standard"),
                        m_node_type);
   } else {
     m_node_type.set(NODE_INTERIOR);
@@ -552,13 +553,13 @@ void SSAFEM::cache_residual_cfbc(const Inputs &inputs) {
   const Vector2 *outward_normal = fem::q1::outward_normals();
 
   const bool
-    use_cfbc          = m_config->get_boolean("stress_balance.calving_front_stress_bc"),
-    is_dry_simulation = m_config->get_boolean("ocean.always_grounded");
+    use_cfbc          = m_config->get_flag("stress_balance.calving_front_stress_bc"),
+    is_dry_simulation = m_config->get_flag("ocean.always_grounded");
 
   const double
-    ice_density      = m_config->get_double("constants.ice.density"),
-    ocean_density    = m_config->get_double("constants.sea_water.density"),
-    standard_gravity = m_config->get_double("constants.standard_gravity");
+    ice_density      = m_config->get_number("constants.ice.density"),
+    ocean_density    = m_config->get_number("constants.sea_water.density"),
+    standard_gravity = m_config->get_number("constants.standard_gravity");
 
   // Reset the boundary integral so that all values are overwritten.
   m_boundary_integral.set(0.0);
@@ -570,7 +571,9 @@ void SSAFEM::cache_residual_cfbc(const Inputs &inputs) {
 
   IceModelVec::AccessList list{&m_node_type,
       &inputs.geometry->ice_thickness,
-      &inputs.geometry->bed_elevation, &m_boundary_integral};
+      &inputs.geometry->bed_elevation,
+      &inputs.geometry->sea_level_elevation,
+      &m_boundary_integral};
 
   // Iterate over the elements.
   const int
@@ -609,6 +612,9 @@ void SSAFEM::cache_residual_cfbc(const Inputs &inputs) {
         double b_nodal[Nk];
         m_element.nodal_values(inputs.geometry->bed_elevation, b_nodal);
 
+        double sl_nodal[Nk];
+        m_element.nodal_values(inputs.geometry->sea_level_elevation, sl_nodal);
+
         // storage for test function values psi[0] for the first "end" of a side, psi[1] for the
         // second
         double psi[2] = {0.0, 0.0};
@@ -640,22 +646,28 @@ void SSAFEM::cache_residual_cfbc(const Inputs &inputs) {
             // Compute ice thickness and bed elevation at a quadrature point. This uses a 1D basis
             // expansion on the side.
             const double
-              H   = H_nodal[n0] * psi[0] + H_nodal[n1] * psi[1],
-              bed = b_nodal[n0] * psi[0] + b_nodal[n1] * psi[1];
+              H         = H_nodal[n0]  * psi[0] + H_nodal[n1]  * psi[1],
+              bed       = b_nodal[n0]  * psi[0] + b_nodal[n1]  * psi[1],
+              sea_level = sl_nodal[n0] * psi[0] + sl_nodal[n1] * psi[1];
 
-            const bool floating = ocean(m_gc.mask(inputs.sea_level, bed, H));
+            const bool floating = ocean(m_gc.mask(sea_level, bed, H));
 
             // ocean pressure difference at a quadrature point
-            const double dP = ocean_pressure_difference(floating, is_dry_simulation,
-                                                        H, bed, inputs.sea_level,
-                                                        ice_density, ocean_density,
-                                                        standard_gravity);
+            const double dP = margin_pressure_difference(floating, is_dry_simulation,
+                                                         H, bed, sea_level,
+                                                         ice_density, ocean_density,
+                                                         standard_gravity);
 
             // This integral contributes to the residual at 2 nodes (the ones incident to the
             // current side). This is is written in a way that allows *adding* (... += ...) the
             // boundary contribution in the residual computation.
             I[n0] += W * (- psi[0] * dP) * outward_normal[side];
             I[n1] += W * (- psi[1] * dP) * outward_normal[side];
+            // FIXME: I need to include the special case corresponding to ice margins next
+            // to fjord walls, nunataks, etc. In this case dP == 0.
+            //
+            // FIXME: set pressure difference to zero at grounded locations at domain
+            // boundaries.
           } // q-loop
 
         } // loop over element sides
@@ -684,7 +696,7 @@ void SSAFEM::compute_local_function(Vector2 const *const *const velocity_global,
 
   const bool use_explicit_driving_stress = (m_driving_stress_x != NULL) && (m_driving_stress_y != NULL);
 
-  const bool use_cfbc = m_config->get_boolean("stress_balance.calving_front_stress_bc");
+  const bool use_cfbc = m_config->get_flag("stress_balance.calving_front_stress_bc");
 
   const unsigned int Nk = fem::q1::n_chi;
   const unsigned int Nq_max = fem::MAX_QUADRATURE_SIZE;
@@ -896,7 +908,7 @@ void SSAFEM::compute_local_jacobian(Vector2 const *const *const velocity_global,
   const unsigned int Nk     = fem::q1::n_chi;
   const unsigned int Nq_max = fem::MAX_QUADRATURE_SIZE;
 
-  const bool use_cfbc = m_config->get_boolean("stress_balance.calving_front_stress_bc");
+  const bool use_cfbc = m_config->get_flag("stress_balance.calving_front_stress_bc");
 
   // Zero out the Jacobian in preparation for updating it.
   PetscErrorCode ierr = MatZeroEntries(Jac);

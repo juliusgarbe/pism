@@ -1,4 +1,4 @@
-// Copyright (C) 2010, 2011, 2012, 2013, 2014, 2015, 2016, 2017 Constantine Khroulev
+// Copyright (C) 2010, 2011, 2012, 2013, 2014, 2015, 2016, 2017, 2018 Constantine Khroulev
 //
 // This file is part of PISM.
 //
@@ -23,8 +23,8 @@
 namespace pism {
 namespace stressbalance {
 
-std::map<std::string, Diagnostic::Ptr> SIAFD::diagnostics_impl() const {
-  std::map<std::string, Diagnostic::Ptr> result = {
+DiagnosticList SIAFD::diagnostics_impl() const {
+  DiagnosticList result = {
     {"diffusivity",           Diagnostic::Ptr(new SIAFD_diffusivity(this))},
     {"diffusivity_staggered", Diagnostic::Ptr(new SIAFD_diffusivity_staggered(this))},
     {"schoofs_theta",         Diagnostic::Ptr(new SIAFD_schoofs_theta(this))},
@@ -44,8 +44,8 @@ SIAFD_schoofs_theta::SIAFD_schoofs_theta(const SIAFD *m)
 
   set_attrs("multiplier 'theta' in Schoof's (2003) theory of bed roughness in SIA", "",
             "1", "", 0);
-  m_vars[0].set_double("valid_min", 0);
-  m_vars[0].set_double("valid_max", 1);
+  m_vars[0].set_number("valid_min", 0);
+  m_vars[0].set_number("valid_max", 1);
 }
 
 IceModelVec::Ptr SIAFD_schoofs_theta::compute_impl() const {
@@ -127,8 +127,6 @@ SIAFD_diffusivity_staggered::SIAFD_diffusivity_staggered(const SIAFD *m)
   : Diag<SIAFD>(m) {
 
   // set metadata:
-  m_dof = 2;
-
   m_vars = {SpatialVariableMetadata(m_sys, "diffusivity_i"),
             SpatialVariableMetadata(m_sys, "diffusivity_j")};
 
@@ -139,7 +137,7 @@ SIAFD_diffusivity_staggered::SIAFD_diffusivity_staggered(const SIAFD *m)
 }
 
 static void copy_staggered_vec(const IceModelVec2Stag &input, IceModelVec2Stag &output) {
-  IceGrid::ConstPtr grid = output.get_grid();
+  IceGrid::ConstPtr grid = output.grid();
 
   IceModelVec::AccessList list{ &input, &output };
 
@@ -166,8 +164,6 @@ SIAFD_h_x::SIAFD_h_x(const SIAFD *m)
   : Diag<SIAFD>(m) {
 
   // set metadata:
-  m_dof = 2;
-
   m_vars = {SpatialVariableMetadata(m_sys, "h_x_i"),
             SpatialVariableMetadata(m_sys, "h_x_j")};
 
@@ -193,8 +189,6 @@ SIAFD_h_y::SIAFD_h_y(const SIAFD *m)
   : Diag<SIAFD>(m) {
 
   // set metadata:
-  m_dof = 2;
-
   m_vars = {SpatialVariableMetadata(m_sys, "h_y_i"),
             SpatialVariableMetadata(m_sys, "h_y_j")};
 

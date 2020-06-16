@@ -1,4 +1,4 @@
-// Copyright (C) 2009--2017 Constantine Khroulev
+// Copyright (C) 2009--2018 Constantine Khroulev
 //
 // This file is part of PISM.
 //
@@ -39,10 +39,10 @@ class Logger;
 
   - units: specifies internal units. When read, a variable is
   converted to these units. When written, it is converted from these
-  to glaciological_units if write_in_glaciological_units is true.
+  to glaciological_units.
 
   - glaciological_units: is never written to a file; replaces 'units'
-  in the output if write_in_glaciological_units is true.
+  in the output file.
 
   - valid_min, valid_max: specify the valid range of a variable. Are
   read from an input file *only* if not specified previously. If
@@ -63,7 +63,7 @@ class Logger;
   - glaciological_units (saved to files as "units")
 
   Use the `name` of "PISM_GLOBAL" to read and write global attributes.
-  (See also PIO.)
+  (See also File.)
 
 */
 
@@ -73,8 +73,8 @@ public:
   virtual ~VariableMetadata();
 
   // setters
-  void set_double(const std::string &name, double value);
-  void set_doubles(const std::string &name, const std::vector<double> &values);
+  void set_number(const std::string &name, double value);
+  void set_numbers(const std::string &name, const std::vector<double> &values);
   void set_name(const std::string &name);
   void set_string(const std::string &name, const std::string &value);
 
@@ -87,8 +87,8 @@ public:
   // getters
   units::System::Ptr unit_system() const;
 
-  double get_double(const std::string &name) const;
-  std::vector<double> get_doubles(const std::string &name) const;
+  double get_number(const std::string &name) const;
+  std::vector<double> get_numbers(const std::string &name) const;
   std::string get_name() const;
   std::string get_string(const std::string &name) const;
 

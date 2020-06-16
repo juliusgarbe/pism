@@ -1,4 +1,4 @@
-// Copyright (C) 2012, 2013, 2014, 2015, 2016, 2017 PISM Authors
+// Copyright (C) 2012, 2013, 2014, 2015, 2016, 2017, 2018 PISM Authors
 //
 // This file is part of PISM.
 //
@@ -16,83 +16,63 @@
 // along with PISM; if not, write to the Free Software
 // Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
-#include <gsl/gsl_math.h>       // M_PI, GSL_NAN
-
 #include "CosineYearlyCycle.hh"
-#include "pism/util/Timeseries.hh"
 #include "pism/util/Time.hh"
 #include "pism/util/pism_options.hh"
 #include "pism/util/ConfigInterface.hh"
 #include "pism/util/IceGrid.hh"
-#include "pism/util/io/PIO.hh"
+#include "pism/util/io/File.hh"
 
 #include "pism/util/error_handling.hh"
 #include "pism/util/MaxTimestep.hh"
 
+#include "pism/coupler/util/ScalarForcing.hh"
+
 namespace pism {
 namespace atmosphere {
 
-CosineYearlyCycle::CosineYearlyCycle(IceGrid::ConstPtr g)
-  : YearlyCycle(g), m_A(NULL) {
+CosineYearlyCycle::CosineYearlyCycle(IceGrid::ConstPtr grid)
+  : YearlyCycle(grid) {
+
+  auto scaling_file = m_config->get_string("atmosphere.yearly_cycle.scaling.file");
+
+  if (not scaling_file.empty()) {
+    m_A.reset(new ScalarForcing(grid->ctx(),
+                                "atmosphere.yearly_cycle.scaling",
+                                "amplitude_scaling",
+                                "1", "1",
+                                "temperature amplitude scaling"));
+  }
 }
 
 CosineYearlyCycle::~CosineYearlyCycle() {
-  if (m_A != NULL) {
-    delete m_A;
-  }
+  // empty
 }
 
-void CosineYearlyCycle::init_impl() {
-
-  m_t = m_dt = GSL_NAN;  // every re-init restarts the clock
+void CosineYearlyCycle::init_impl(const Geometry &geometry) {
+  (void) geometry;
 
   m_log->message(2,
-             "* Initializing the 'cosine yearly cycle' atmosphere model (-atmosphere yearly_cycle)...\n");
+                 "* Initializing the 'cosine yearly cycle' atmosphere model...\n");
 
+  auto input_file   = m_config->get_string("atmosphere.yearly_cycle.file");
 
-  options::String input_file("-atmosphere_yearly_cycle_file",
-                             "CosineYearlyCycle input file name");
-  options::String scaling_file("-atmosphere_yearly_cycle_scaling_file",
-                               "CosineYearlyCycle amplitude scaling input file name");
-
-  if (not input_file.is_set()) {
-    throw RuntimeError(PISM_ERROR_LOCATION, "Please specify an '-atmosphere yearly_cycle' input file\n"
-                       "using the -atmosphere_yearly_cycle_file option.");
+  if (input_file.empty()) {
+    throw RuntimeError(PISM_ERROR_LOCATION,
+                       "Please specify an '-atmosphere yearly_cycle' input file\n"
+                       "using atmosphere.yearly_cycle.file or a command-line option.");
   }
 
   m_log->message(2,
-             "  Reading mean annual air temperature, mean July air temperature, and\n"
-             "  precipitation fields from '%s'...\n", input_file->c_str());
+                 "  Reading mean annual air temperature, mean July air temperature, and\n"
+                 "  precipitation fields from '%s'...\n", input_file.c_str());
 
   m_air_temp_mean_annual.regrid(input_file, CRITICAL);
-  m_air_temp_mean_july.regrid(input_file, CRITICAL);
+  m_air_temp_mean_summer.regrid(input_file, CRITICAL);
   m_precipitation.regrid(input_file, CRITICAL);
 
-  if (scaling_file.is_set()) {
-
-    if (m_A == NULL) {
-      m_A = new Timeseries(*m_grid, "amplitude_scaling",
-                           m_config->get_string("time.dimension_name"));
-      m_A->variable().set_string("units", "1");
-      m_A->variable().set_string("long_name", "cosine yearly cycle amplitude scaling");
-      m_A->dimension().set_string("units", m_grid->ctx()->time()->units_string());
-    }
-
-    m_log->message(2,
-               "  Reading cosine yearly cycle amplitude scaling from '%s'...\n",
-               scaling_file->c_str());
-
-    PIO nc(m_grid->com, "netcdf3", scaling_file, PISM_READONLY);    // OK to use netcdf3
-    {
-      m_A->read(nc, *m_grid->ctx()->time(), *m_grid->ctx()->log());
-    }
-    nc.close();
-
-  } else {
-    if (m_A != NULL) {
-      delete m_A;
-    }
-    m_A = NULL;
+  if (m_A) {
+    m_A->init();
   }
 }
 
@@ -101,18 +81,20 @@ MaxTimestep CosineYearlyCycle::max_timestep_impl(double t) const {
   return MaxTimestep("atmosphere cosine_yearly_cycle");
 }
 
-void CosineYearlyCycle::update_impl(double my_t, double my_dt) {
-  m_t = my_t;
-  m_dt = my_dt;
+void CosineYearlyCycle::update_impl(const Geometry &geometry, double t, double dt) {
+  (void) geometry;
+  if (m_A) {
+    m_A->update(t, dt);
+  }
 }
 
 void CosineYearlyCycle::init_timeseries_impl(const std::vector<double> &ts) const {
 
   YearlyCycle::init_timeseries_impl(ts);
 
-  if (m_A != NULL) {
+  if (m_A) {
     for (unsigned int k = 0; k < ts.size(); ++k) {
-      m_cosine_cycle[k] *= (*m_A)(ts[k]);
+      m_cosine_cycle[k] *= m_A->value(ts[k]);
     }
   }
 }

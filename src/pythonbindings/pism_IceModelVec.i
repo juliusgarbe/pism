@@ -1,6 +1,8 @@
 %{
-/* Using directives needed to compile IceModelVec wrappers. */  
+/* Using directives needed to compile IceModelVec wrappers. */
 #include "util/IceModelVec2CellType.hh"
+#include "util/iceModelVec2T.hh"
+#include "util/iceModelVec3Custom.hh"
 
 using namespace pism;
 %}
@@ -9,12 +11,14 @@ using namespace pism;
 %shared_ptr(pism::IceModelVec)
 %shared_ptr(pism::IceModelVec2)
 %shared_ptr(pism::IceModelVec2S)
+%shared_ptr(pism::IceModelVec2T)
 %shared_ptr(pism::IceModelVec2V)
 %shared_ptr(pism::IceModelVec2Int)
 %shared_ptr(pism::IceModelVec2CellType)
 %shared_ptr(pism::IceModelVec2Stag)
 %shared_ptr(pism::IceModelVec3D)
 %shared_ptr(pism::IceModelVec3)
+%shared_ptr(pism::IceModelVec3Custom)
 
 %ignore pism::AccessList::AccessList(std::initializer_list<const PetscAccessible *>);
 
@@ -24,14 +28,7 @@ using namespace pism;
 %rename(_regrid) pism::IceModelVec::regrid;
 %extend pism::IceModelVec
 {
-  %pythoncode {
-    def regrid(self,filename,critical=False,default_value=0.0):
-      if critical == True:
-        flag = CRITICAL
-      else:
-        flag = OPTIONAL
-      self._regrid(filename, flag, default_value)
-  }
+  %pythoncode "IceModelVec.py"
 }
 
 // We also make the same fix for IceModelVec2's.
@@ -62,15 +59,7 @@ using namespace pism;
         (*($self))(i,j) = val;
     }
 
-    %pythoncode {
-    def __getitem__(self,*args):
-        return self.getitem(args[0][0],args[0][1])
-    def __setitem__(self,*args):
-        if(len(args)==2):
-            self.setitem(args[0][0],args[0][1],args[1])
-        else:
-            raise ValueError("__setitem__ requires 2 arguments; received %d" % len(args));
-    }
+    %pythoncode "IceModelVec2S.py"
 };
 
 %rename(__mult__) pism::Vector2::operator*;
@@ -103,20 +92,7 @@ using namespace pism;
         (*($self))(i,j).v = v;
     }
 
-    %pythoncode {
-    def __getitem__(self,*args):
-        return self.getitem(args[0][0],args[0][1])
-    def __setitem__(self,*args):
-        if(len(args)==2):
-            i=args[0][0]; j=args[0][1]
-            val = args[1];
-            if(isinstance(val,list) and len(val)==2):
-                self.setitem(i,j,val[0],val[1])
-            else:
-                self.setitem(i,j,val)
-        else:
-            raise ValueError("__setitem__ requires 2 arguments; received %d" % len(args));
-    }
+    %pythoncode "IceModelVec2V.py"
 };
 
 %ignore pism::IceModelVec3D::getInternalColumn(int,int) const;
@@ -147,7 +123,23 @@ using namespace pism;
     }
 };
 
+%ignore pism::IceModelVec2T::interp(int, int, double*);
+%extend pism::IceModelVec2T
+{
+std::vector<double> interp(int i, int j) {
+  std::vector<double> result;
+  $self->interp(i, j, result);
+  return result;
+}
+};
+
 %ignore pism::StarStencil::operator[];
+%include "util/StarStencil.hh"
+%template(DoubleStar) pism::StarStencil<double>;
+
 %include "util/iceModelVec.hh"
 %include "util/IceModelVec2CellType.hh"
+%include "util/iceModelVec2T.hh"
 %include "util/Vector2.hh"
+
+%include "util/iceModelVec3Custom.hh"

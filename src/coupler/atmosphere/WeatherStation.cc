@@ -1,4 +1,4 @@
-/* Copyright (C) 2014, 2015, 2016, 2017 PISM Authors
+/* Copyright (C) 2014, 2015, 2016, 2017, 2018 PISM Authors
  *
  * This file is part of PISM.
  *
@@ -17,71 +17,66 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  */
 
-#include <gsl/gsl_math.h>
-
 #include "WeatherStation.hh"
 #include "pism/util/ConfigInterface.hh"
-#include "pism/util/pism_const.hh"
-#include "pism/util/pism_options.hh"
+#include "pism/util/pism_utilities.hh"
 #include "pism/util/iceModelVec.hh"
 #include "pism/util/Time.hh"
 #include "pism/util/IceGrid.hh"
-#include "pism/util/io/PIO.hh"
+#include "pism/util/io/File.hh"
 #include "pism/util/error_handling.hh"
 #include "pism/util/io/io_helpers.hh"
 #include "pism/util/MaxTimestep.hh"
-#include "pism/util/pism_utilities.hh"
 
 namespace pism {
 namespace atmosphere {
 
-WeatherStation::WeatherStation(IceGrid::ConstPtr g)
-  : AtmosphereModel(g),
-    m_precipitation_timeseries(*g, "precipitation", m_config->get_string("time.dimension_name")),
-    m_air_temp_timeseries(*g, "air_temp", m_config->get_string("time.dimension_name"))
+WeatherStation::WeatherStation(IceGrid::ConstPtr grid)
+  : AtmosphereModel(grid),
+    m_precipitation_timeseries(*grid, "precipitation", m_config->get_string("time.dimension_name")),
+    m_air_temp_timeseries(*grid, "air_temp", m_config->get_string("time.dimension_name"))
 {
-  m_precipitation_timeseries.dimension().set_string("units", m_grid->ctx()->time()->units_string());
+  m_precipitation_timeseries.dimension().set_string("units", grid->ctx()->time()->units_string());
   m_precipitation_timeseries.variable().set_string("units", "kg m-2 second-1");
   m_precipitation_timeseries.variable().set_string("long_name",
-                                        "ice-equivalent precipitation rate");
+                                                   "ice-equivalent precipitation rate");
 
-  m_air_temp_timeseries.dimension().set_string("units", m_grid->ctx()->time()->units_string());
+  m_air_temp_timeseries.dimension().set_string("units", grid->ctx()->time()->units_string());
   m_air_temp_timeseries.variable().set_string("units", "Kelvin");
   m_air_temp_timeseries.variable().set_string("long_name",
-                                          "near-surface air temperature");
+                                              "near-surface air temperature");
+
+  m_precipitation = allocate_precipitation(grid);
+  m_temperature   = allocate_temperature(grid);
 }
 
 WeatherStation::~WeatherStation() {
   // empty
 }
 
-void WeatherStation::init_impl() {
-
-  m_t = m_dt = GSL_NAN;  // every re-init restarts the clock
+void WeatherStation::init_impl(const Geometry &geometry) {
+  (void) geometry;
 
   m_log->message(2,
-             "* Initializing the constant-in-space atmosphere model\n"
-             "  for use with scalar data from one weather station\n"
-             "  combined with lapse rate corrections...\n");
+                 "* Initializing the constant-in-space atmosphere model\n"
+                 "  for use with scalar data from one weather station\n"
+                 "  combined with lapse rate corrections...\n");
 
-  std::string option = "-atmosphere_one_station_file";
+  auto filename = m_config->get_string("atmosphere.one_station.file");
 
-  options::String filename(option,
-                           "Specifies a file containing scalar time-series"
-                           " 'precipitation' and 'air_temp'.");
-
-  if (not filename.is_set()) {
-    throw RuntimeError::formatted(PISM_ERROR_LOCATION, "Command-line option %s is required.", option.c_str());
+  if (filename.empty()) {
+    throw RuntimeError(PISM_ERROR_LOCATION,
+                       "atmosphere.one_station.file cannot be empty");
   }
 
   m_log->message(2,
-             "  - Reading air temperature and precipitation from '%s'...\n",
-             filename->c_str());
+                 "  - Reading air temperature and precipitation from '%s'...\n",
+                 filename.c_str());
 
-  PIO nc(m_grid->com, "netcdf3", filename, PISM_READONLY);
+  File file(m_grid->com, filename, PISM_NETCDF3, PISM_READONLY);
   {
-    m_precipitation_timeseries.read(nc, *m_grid->ctx()->time(), *m_grid->ctx()->log());
-    m_air_temp_timeseries.read(nc, *m_grid->ctx()->time(), *m_grid->ctx()->log());
+    m_precipitation_timeseries.read(file, *m_grid->ctx()->time(), *m_grid->ctx()->log());
+    m_air_temp_timeseries.read(file, *m_grid->ctx()->time(), *m_grid->ctx()->log());
   }
 }
 
@@ -90,25 +85,23 @@ MaxTimestep WeatherStation::max_timestep_impl(double t) const {
   return MaxTimestep("atmosphere weather_station");
 }
 
-void WeatherStation::update_impl(double t, double dt) {
-  m_t = t;
-  m_dt = dt;
+void WeatherStation::update_impl(const Geometry &geometry, double t, double dt) {
+  (void) geometry;
+
+  double one_week = 7 * 24 * 60 * 60;
+  unsigned int N = (unsigned int)(ceil(dt / one_week)); // one point per week
+
+  m_precipitation->set(m_precipitation_timeseries.average(t, dt, N));
+
+  m_temperature->set(m_air_temp_timeseries.average(t, dt, N));
 }
 
-void WeatherStation::mean_precipitation_impl(IceModelVec2S &result) const {
-  const double one_week = 7 * 24 * 60 * 60;
-
-  unsigned int N = (unsigned int)(ceil(m_dt / one_week)); // one point per week
-
-  result.set(m_precipitation_timeseries.average(m_t, m_dt, N));
+const IceModelVec2S& WeatherStation::mean_precipitation_impl() const {
+  return *m_precipitation;
 }
 
-void WeatherStation::mean_annual_temp_impl(IceModelVec2S &result) const {
-  const double one_week = 7 * 24 * 60 * 60;
-
-  unsigned int N = (unsigned int)(ceil(m_dt / one_week)); // one point per week
-
-  result.set(m_air_temp_timeseries.average(m_t, m_dt, N));
+const IceModelVec2S& WeatherStation::mean_annual_temp_impl() const {
+  return *m_temperature;
 }
 
 void WeatherStation::begin_pointwise_access_impl() const {

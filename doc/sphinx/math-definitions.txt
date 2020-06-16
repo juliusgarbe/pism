@@ -28,6 +28,11 @@
       \newcommand{\bmin}{b_{\mathrm{min}}}
       \newcommand{\bmax}{b_{\mathrm{max}}}
       \newcommand{\bq}{\mathbf{q}}
+      \newcommand{\Up}[2]{\operatorname{Up}\left(#1\big|#2\right)}
+      \newcommand{\uppair}[2]{\left\{\begin{matrix} #1 \\ #2 \end{matrix}\right\}}
+      \newcommand{\div}{\nabla \cdot}
+      \newcommand{\V}{\mathbf{V}}
+      \newcommand{\Wtill}{W_{\mathrm{till}}}
 
 .. raw:: latex
 
@@ -36,6 +41,7 @@
    % generic
    \providecommand{\Diff}[2]{ \frac{\mathrm{d}#1}{\mathrm{d}#2} }
    \providecommand{\diff}[2]{ \frac{\partial #1}{\partial #2} }
+   \providecommand{\div}{\nabla \cdot}
 
    % elevation-dependent surface model
    \providecommand{\var}[2]{ {#1}_{\text{#2}} }
@@ -60,3 +66,9 @@
 
    % hydrology
    \providecommand{\bq}{\mathbf{q}}
+   \providecommand{\V}{\mathbf{V}} % velocity vector
+   \providecommand{\Wtill}{W_{\mathrm{till}}}
+
+   % BOMBPROOF
+   \providecommand{\Up}[2]{\operatorname{Up}\left(#1\big|#2\right)}
+   \providecommand{\uppair}[2]{\left\{\begin{matrix} #1 \\ #2 \end{matrix}\right\}}

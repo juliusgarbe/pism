@@ -11,8 +11,10 @@ Technical notes
 
    bed_roughness.rst
 
-   coding_guidelines.rst
+   ssafd-cfbc.rst
 
-   how-to.rst
+   bombproof.rst
 
-   icemodelvec2t.rst
+   steady-hydrology.rst
+
+   release_checklist.rst

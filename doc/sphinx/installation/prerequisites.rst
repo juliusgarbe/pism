@@ -21,22 +21,31 @@ This table lists required dependencies for PISM alphabetically.
 Before installing these "by hand", check sections :ref:`sec-install-debian` and
 :ref:`sec-install-macos` for specific how-to.
 
-In particular, if multiple MPI implementations (e.g. MPICH and Open-MPI) are installed
+In particular, if multiple MPI implementations (e.g. MPICH and Open MPI) are installed
 then PETSc can under some situations "get confused" and throw MPI-related errors. Even
 package systems have been known to allow this confusion.
 
-Optional libraries listed below are needed for certain PISM features, namely cell-area
-correction and parallel I/O. These libraries are recommended, but not strictly required:
+.. note::
+
+   We recommend un-installing all MPI libraries except one. In most cases there is no
+   reason to have both Open MPI and MPICH, for example.
+
+Optional libraries listed below are needed for certain PISM features, namely computing
+longitude, latitude coordinates of grid points and parallel I/O. These libraries are
+recommended, but not strictly required:
 
 .. csv-table::
-   :header: Recommended Library, Comment
+   :header: Optional Library, Comment
 
-   PROJ.4_,  Used to compute cell areas and cell bounds
-   PnetCDF_, Can be used for parallel I/O
+   PROJ_,  version `\ge` 5.0 (used to compute longitude-latitude grid coordinates and cell bounds)
+   PnetCDF_, Can be used for faster parallel I/O
+   ParallelIO_, Can be used for faster parallel I/O
 
-Python_ is needed both in the PETSc installation process and in scripts related to PISM
-pre- and post-processing, while Git_ is usually needed to download the PISM code. Both
-should be included in any Linux/Unix distribution.
+Python_ is needed for the PETSc installation process; a number of PISM's pre- and
+post-processing scripts also use Python (either 2.7 or 3.x), while Git_ is usually needed
+to download the PISM code.
+
+PISM's Python bindings support Python 2.7 or 3.3 and later [#]_.
 
 The following Python packages are needed to do all the examples in the :ref:`User’s Manual
 <sec-users-manual>` (which run Python scripts):
@@ -53,3 +62,4 @@ The following Python packages are needed to do all the examples in the :ref:`Use
 .. [#] Note that PISM uses ``ncgen`` (provided by NetCDF) on the system where PISM is
        *compiled*.
 .. [#] "PETSc" is pronounced "pet-see".
+.. [#] PISM's Python bindings are tested using Python 3.6.

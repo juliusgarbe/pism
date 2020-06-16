@@ -1,4 +1,4 @@
-/* Copyright (C) 2016, 2017 PISM Authors
+/* Copyright (C) 2016, 2017, 2018, 2019 PISM Authors
  *
  * This file is part of PISM.
  *
@@ -20,7 +20,7 @@
 #include "EnergyModel.hh"
 #include "pism/util/MaxTimestep.hh"
 #include "pism/stressbalance/StressBalance.hh"
-#include "pism/util/io/PIO.hh"
+#include "pism/util/io/File.hh"
 #include "pism/util/Vars.hh"
 #include "utilities.hh"
 #include "pism/util/EnthalpyConverter.hh"
@@ -50,7 +50,7 @@ Inputs::Inputs() {
   surface_temp             = NULL;
   till_water_thickness     = NULL;
 
-  strain_heating3          = NULL;
+  volumetric_heating_rate  = NULL;
   u3                       = NULL;
   v3                       = NULL;
   w3                       = NULL;
@@ -68,7 +68,7 @@ void Inputs::check() const {
   check_input(surface_temp,             "surface_temp");
   check_input(till_water_thickness,     "till_water_thickness");
 
-  check_input(strain_heating3, "strain_heating3");
+  check_input(volumetric_heating_rate, "volumetric_heating_rate");
   check_input(u3, "u3");
   check_input(v3, "v3");
   check_input(w3, "w3");
@@ -90,6 +90,34 @@ EnergyModelStats& EnergyModelStats::operator+=(const EnergyModelStats &other) {
 }
 
 
+bool marginal(const IceModelVec2S &thickness, int i, int j, double threshold) {
+  int
+    n = j + 1,
+    e = i + 1,
+    s = j - 1,
+    w = i - 1;
+
+  const double
+    N  = thickness(i, n),
+    E  = thickness(e, j),
+    S  = thickness(i, s),
+    W  = thickness(w, j),
+    NW = thickness(w, n),
+    SW = thickness(w, s),
+    NE = thickness(e, n),
+    SE = thickness(e, s);
+
+  return ((E  < threshold) or
+          (NE < threshold) or
+          (N  < threshold) or
+          (NW < threshold) or
+          (W  < threshold) or
+          (SW < threshold) or
+          (S  < threshold) or
+          (SE < threshold));
+}
+
+
 void EnergyModelStats::sum(MPI_Comm com) {
   bulge_counter            = GlobalSum(com, bulge_counter);
   reduced_accuracy_counter = GlobalSum(com, reduced_accuracy_counter);
@@ -100,16 +128,16 @@ void EnergyModelStats::sum(MPI_Comm com) {
 
 EnergyModel::EnergyModel(IceGrid::ConstPtr grid,
                          stressbalance::StressBalance *stress_balance)
-  : Component_TS(grid), m_stress_balance(stress_balance) {
+  : Component(grid), m_stress_balance(stress_balance) {
 
-  const unsigned int WIDE_STENCIL = m_config->get_double("grid.max_stencil_width");
+  const unsigned int WIDE_STENCIL = m_config->get_number("grid.max_stencil_width");
 
   {
     m_ice_enthalpy.create(m_grid, "enthalpy", WITH_GHOSTS, WIDE_STENCIL);
     // POSSIBLE standard name = land_ice_enthalpy
     m_ice_enthalpy.set_attrs("model_state",
                              "ice enthalpy (includes sensible heat, latent heat, pressure)",
-                             "J kg-1", "");
+                             "J kg-1", "J kg-1", "", 0);
   }
 
   {
@@ -117,10 +145,9 @@ EnergyModel::EnergyModel(IceGrid::ConstPtr grid,
     // ghosted to allow the "redundant" computation of tauc
     m_basal_melt_rate.set_attrs("model_state",
                                 "ice basal melt rate from energy conservation, in ice thickness per time (valid in grounded areas)",
-                                "m s-1", "");
+                                "m s-1", "m year-1", "", 0);
     // We could use land_ice_basal_melt_rate, but that way both basal_melt_rate_grounded and bmelt
     // have this standard name.
-    m_basal_melt_rate.metadata().set_string("glaciological_units", "m year-1");
     m_basal_melt_rate.metadata().set_string("comment", "positive basal melt rate corresponds to ice loss");
   }
 
@@ -129,19 +156,19 @@ EnergyModel::EnergyModel(IceGrid::ConstPtr grid,
     m_work.create(m_grid, "work_vector", WITHOUT_GHOSTS);
     m_work.set_attrs("internal",
                      "usually new values of temperature or enthalpy during time step",
-                     "", "");
+                     "", "", "", 0);
   }
 }
 
-void EnergyModel::init_enthalpy(const PIO &input_file, bool do_regrid, int record) {
+void EnergyModel::init_enthalpy(const File &input_file, bool do_regrid, int record) {
 
-  if (input_file.inq_var("enthalpy")) {
+  if (input_file.find_variable("enthalpy")) {
     if (do_regrid) {
       m_ice_enthalpy.regrid(input_file, CRITICAL);
     } else {
       m_ice_enthalpy.read(input_file, record);
     }
-  } else if (input_file.inq_var("temp")) {
+  } else if (input_file.find_variable("temp")) {
     IceModelVec3
       &temp    = m_work,
       &liqfrac = m_ice_enthalpy;
@@ -149,7 +176,8 @@ void EnergyModel::init_enthalpy(const PIO &input_file, bool do_regrid, int recor
     {
       temp.set_name("temp");
       temp.metadata(0).set_name("temp");
-      temp.set_attrs("temporary", "ice temperature", "Kelvin", "land_ice_temperature");
+      temp.set_attrs("temporary", "ice temperature",
+                     "Kelvin", "Kelvin", "land_ice_temperature", 0);
 
       if (do_regrid) {
         temp.regrid(input_file, CRITICAL);
@@ -160,13 +188,13 @@ void EnergyModel::init_enthalpy(const PIO &input_file, bool do_regrid, int recor
 
     const IceModelVec2S & ice_thickness = *m_grid->variables().get_2d_scalar("land_ice_thickness");
 
-    if (input_file.inq_var("liqfrac")) {
+    if (input_file.find_variable("liqfrac")) {
       SpatialVariableMetadata enthalpy_metadata = m_ice_enthalpy.metadata();
 
       liqfrac.set_name("liqfrac");
       liqfrac.metadata(0).set_name("liqfrac");
       liqfrac.set_attrs("temporary", "ice liquid water fraction",
-                        "1", "");
+                        "1", "1", "", 0);
 
       if (do_regrid) {
         liqfrac.regrid(input_file, CRITICAL);
@@ -190,7 +218,7 @@ void EnergyModel::init_enthalpy(const PIO &input_file, bool do_regrid, int recor
   } else {
     throw RuntimeError::formatted(PISM_ERROR_LOCATION,
                                   "neither enthalpy nor temperature was found in '%s'.\n",
-                                  input_file.inq_filename().c_str());
+                                  input_file.filename().c_str());
   }
 }
 
@@ -199,30 +227,29 @@ void EnergyModel::init_enthalpy(const PIO &input_file, bool do_regrid, int recor
  * fraction.
  */
 void EnergyModel::regrid_enthalpy() {
-  options::String regrid_filename("-regrid_file", "regridding file name");
 
-  options::StringSet regrid_vars("-regrid_vars",
-                                 "comma-separated list of regridding variables",
-                                 "");
+  auto regrid_filename = m_config->get_string("input.regrid.file");
+  auto regrid_vars     = set_split(m_config->get_string("input.regrid.vars"), ',');
 
-  if (not regrid_filename.is_set()) {
+
+  if (regrid_filename.empty()) {
     return;
   }
 
   std::string enthalpy_name = m_ice_enthalpy.metadata().get_name();
 
-  if (not regrid_vars.is_set() or set_contains(regrid_vars, enthalpy_name)) {
-    PIO regrid_file(m_grid->com, "guess_mode", regrid_filename, PISM_READONLY);
+  if (regrid_vars.empty() or member(enthalpy_name, regrid_vars)) {
+    File regrid_file(m_grid->com, regrid_filename, PISM_GUESS, PISM_READONLY);
     init_enthalpy(regrid_file, true, 0);
   }
 }
 
 
-void EnergyModel::restart(const PIO &input_file, int record) {
+void EnergyModel::restart(const File &input_file, int record) {
   this->restart_impl(input_file, record);
 }
 
-void EnergyModel::bootstrap(const PIO &input_file,
+void EnergyModel::bootstrap(const File &input_file,
                             const IceModelVec2S &ice_thickness,
                             const IceModelVec2S &surface_temperature,
                             const IceModelVec2S &climatic_mass_balance,
@@ -284,15 +311,6 @@ void EnergyModel::update(double t, double dt, const Inputs &inputs) {
   }
 }
 
-void EnergyModel::update_impl(double t, double dt) {
-  // This method should NOT have the "noreturn" attribute. (This attribute does not mix with virtual
-  // methods).
-  (void) t;
-  (void) dt;
-  throw RuntimeError::formatted(PISM_ERROR_LOCATION,
-                                "EnergyModel::update_impl(t, dt) is not implemented");
-}
-
 MaxTimestep EnergyModel::max_timestep_impl(double t) const {
   // silence a compiler warning
   (void) t;
@@ -329,8 +347,7 @@ public:
   LiquifiedIceFlux(const EnergyModel *m)
     : TSDiag<TSFluxDiagnostic, EnergyModel>(m, "liquified_ice_flux") {
 
-    m_ts.variable().set_string("units", "m3 / second");
-    m_ts.variable().set_string("glaciological_units", "m3 / year");
+    set_units("m3 / second", "m3 / year");
     m_ts.variable().set_string("long_name",
                                "rate of ice loss due to liquefaction,"
                                " averaged over the reporting interval");
@@ -384,8 +401,8 @@ protected:
 
 } // end of namespace diagnostics
 
-std::map<std::string, Diagnostic::Ptr> EnergyModel::diagnostics_impl() const {
-  std::map<std::string, Diagnostic::Ptr> result;
+DiagnosticList EnergyModel::diagnostics_impl() const {
+  DiagnosticList result;
   result = {
     {"enthalpy",                 Diagnostic::Ptr(new diagnostics::Enthalpy(this))},
     {"basal_melt_rate_grounded", Diagnostic::wrap(m_basal_melt_rate)}
@@ -393,7 +410,7 @@ std::map<std::string, Diagnostic::Ptr> EnergyModel::diagnostics_impl() const {
   return result;
 }
 
-std::map<std::string, TSDiagnostic::Ptr> EnergyModel::ts_diagnostics_impl() const {
+TSDiagnosticList EnergyModel::ts_diagnostics_impl() const {
   return {
     {"liquified_ice_flux", TSDiagnostic::Ptr(new LiquifiedIceFlux(this))}
   };

@@ -1,4 +1,4 @@
-// Copyright (C) 2010, 2011, 2012, 2013, 2014, 2015, 2016, 2017 Constantine Khroulev and Ed Bueler
+// Copyright (C) 2010--2019 Constantine Khroulev and Ed Bueler
 //
 // This file is part of PISM.
 //
@@ -38,8 +38,8 @@ namespace stressbalance {
  * Vertically-averaged ocean pressure difference at the calving front, used in the implementation of
  * the stress boundary condition at the calving front in SSA stress balance solvers.
  */
-double ocean_pressure_difference(bool shelf, bool dry_mode, double H, double bed, double sea_level,
-                                 double rho_ice, double rho_ocean, double g);
+double margin_pressure_difference(bool shelf, bool dry_mode, double H, double bed, double sea_level,
+                                  double rho_ice, double rho_ocean, double g);
 
 class Inputs;
 
@@ -61,10 +61,6 @@ public:
   //! \brief Get the basal frictional heating (for the adaptive energy time-stepping).
   const IceModelVec2S& basal_frictional_heating();
 
-  void compute_2D_stresses(const IceModelVec2V &velocity,
-                           const IceModelVec2CellType &mask,
-                           IceModelVec2 &result) const;
-
   void compute_basal_frictional_heating(const IceModelVec2V &velocity,
                                         const IceModelVec2S &tauc,
                                         const IceModelVec2CellType &mask,
@@ -74,7 +70,7 @@ public:
   //! \brief Produce a report string for the standard output.
   virtual std::string stdout_report() const;
 
-  const rheology::FlowLaw* flow_law() const;
+  std::shared_ptr<const rheology::FlowLaw> flow_law() const;
 
   EnthalpyConverter::Ptr enthalpy_converter() const;
 
@@ -82,10 +78,10 @@ public:
 protected:
   virtual void init_impl();
   
-  virtual std::map<std::string, Diagnostic::Ptr> diagnostics_impl() const;
+  virtual DiagnosticList diagnostics_impl() const;
 
   IceBasalResistancePlasticLaw *m_basal_sliding_law;
-  rheology::FlowLaw *m_flow_law;
+  std::shared_ptr<rheology::FlowLaw> m_flow_law;
   EnthalpyConverter::Ptr m_EC;
 
   IceModelVec2V m_velocity;
